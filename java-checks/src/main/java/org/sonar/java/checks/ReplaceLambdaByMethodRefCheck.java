@@ -42,6 +42,7 @@ import org.sonar.plugins.java.api.tree.NewClassTree;
 import org.sonar.plugins.java.api.tree.ParenthesizedTree;
 import org.sonar.plugins.java.api.tree.ReturnStatementTree;
 import org.sonar.plugins.java.api.tree.Tree;
+import org.sonar.plugins.java.api.tree.TypeCastTree;
 import org.sonar.plugins.java.api.tree.VariableTree;
 
 @Rule(key = "S1612")
@@ -64,6 +65,11 @@ public class ReplaceLambdaByMethodRefCheck extends SubscriptionVisitor {
     if (isReplaceableSingleMethodInvocation(tree) || isBodyBlockInvokingMethod(tree)) {
       context.reportIssue(this, tree.arrowToken(), "Replace this lambda with a method reference." + context.getJavaVersion().java8CompatibilityMessage());
     } else {
+      getTypeCast(tree)
+        .ifPresent(type ->
+          context.reportIssue(this, tree.arrowToken(),
+            "Replace this lambda with method reference '" + type + ".class::cast'." + context.getJavaVersion().java8CompatibilityMessage())
+        );
       getNullCheck(tree)
         .ifPresent(nullMethod ->
           context.reportIssue(this, tree.arrowToken(),
@@ -87,6 +93,21 @@ public class ReplaceLambdaByMethodRefCheck extends SubscriptionVisitor {
     return Optional.empty();
   }
 
+  private static Optional<String> getTypeCast(LambdaExpressionTree lambda) {
+    Tree lambdaBody = lambda.body();
+    if (isBlockWithOneStatement(lambdaBody)) {
+      return getTypeCastFromReturn(((BlockTree) lambdaBody).body().get(0), lambda);
+    }
+    return getTypeCast(lambdaBody, lambda);
+  }
+
+  private static Optional<String> getTypeCastFromReturn(Tree statement, LambdaExpressionTree lambda) {
+    if (statement.is(Tree.Kind.RETURN_STATEMENT)) {
+      return getTypeCast(((ReturnStatementTree) statement).expression(), lambda);
+    }
+    return Optional.empty();
+  }
+
   private static Optional<String> getNullCheck(@Nullable Tree statement, LambdaExpressionTree tree) {
     if (statement == null) {
       return Optional.empty();
@@ -106,10 +127,35 @@ public class ReplaceLambdaByMethodRefCheck extends SubscriptionVisitor {
     return Optional.empty();
   }
 
+  private static Optional<String> getTypeCast(@Nullable Tree statement, LambdaExpressionTree tree) {
+    if (statement == null) {
+      return Optional.empty();
+    }
+    Tree expr = statement;
+    if (expr.is(Tree.Kind.PARENTHESIZED_EXPRESSION)) {
+      expr = ExpressionUtils.skipParentheses((ParenthesizedTree) statement);
+    }
+    if (expr.is(Tree.Kind.TYPE_CAST)) {
+      TypeCastTree typeCastTree = (TypeCastTree) expr;
+      if (isSingleParamCast(typeCastTree.expression(), tree)) {
+        return Optional.of(typeCastTree.type().symbolType().name());
+      }
+    }
+    return Optional.empty();
+  }
+
   private static boolean nullAgainstParam(ExpressionTree o1, ExpressionTree o2, LambdaExpressionTree tree) {
     if (o1.is(Tree.Kind.NULL_LITERAL) && o2.is(Tree.Kind.IDENTIFIER)) {
       List<VariableTree> parameters = tree.parameters();
       return parameters.size() == 1 && parameters.get(0).symbol().equals(((IdentifierTree) o2).symbol());
+    }
+    return false;
+  }
+
+  private static boolean isSingleParamCast(ExpressionTree expression, LambdaExpressionTree tree) {
+    if (expression.is(Tree.Kind.IDENTIFIER)) {
+      List<VariableTree> parameters = tree.parameters();
+      return parameters.size() == 1 && parameters.get(0).symbol().equals(((IdentifierTree) expression).symbol());
     }
     return false;
   }
