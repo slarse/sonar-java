@@ -224,15 +224,15 @@ public class InternalCheckVerifier implements CheckVerifier {
   }
 
   private void checkIssues(Set<AnalyzerMessage> issues) {
+    if (customIssueVerifier != null) {
+      customIssueVerifier.accept(issues);
+    }
     if (expectations.expectNoIssues()) {
       assertNoIssues(issues);
     } else if (expectations.expectIssueAtFileLevel() || expectations.expectIssueAtProjectLevel()) {
       assertComponentIssue(issues);
     } else {
       assertMultipleIssues(issues);
-    }
-    if (customIssueVerifier != null) {
-      customIssueVerifier.accept(issues);
     }
   }
 
